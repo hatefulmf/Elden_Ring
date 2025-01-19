@@ -1,12 +1,22 @@
+const bcrypt = require('bcrypt'); // Import bcrypt
+
 async function createUser(client, user_id, username, password, email) {
     try {
         const database = client.db('TheDune');
         const collection = database.collection('users');
 
+        console.log("Plain password before hashing:", password); // Debugging line
+
+        // Hash the password before saving it
+        const saltRounds = 10; // Number of hashing rounds (higher is more secure, but slower)
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+        console.log("Hashed password:", hashedPassword); // Debugging line
+
         const user = {
             user_id: user_id,
             username: username,
-            password: password,
+            password: hashedPassword, // Store the hashed password
             email: email,
             registration_date: new Date().toISOString(),
             profile: {

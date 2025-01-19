@@ -2,9 +2,10 @@ const express = require('express');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+require('dotenv').config();
 
 
-const JWT_SECRET = "Syah021015*@"; // Secure key
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const app = express();
 const port = process.env.port || 8080;
@@ -63,6 +64,7 @@ app.get('/', (req, res) => {
     res.send('Welcome to the API');
 });
 
+const bcrypt = require('bcrypt'); // Import bcrypt
 // Create user route with auto-increment user_id
 app.post('/createUser', async (req, res) => {
     try {
@@ -87,13 +89,20 @@ app.post('/createUser', async (req, res) => {
             return res.status(409).send("Email address already been used");
         }
 
+        // Hash the password
+        const saltRounds = 10; // Number of hashing rounds (higher is more secure, but slower)
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+        // Log the hashed password to verify it's hashed properly
+        console.log("Hashed password:", hashedPassword);  // <-- Add this line
+
         // Generate a unique user_id using uuid
         const user_id = uuidv4();
 
         const user = {
-            user_id,  // Using uuid as user_id
+            user_id,
             username,
-            password,
+            password: hashedPassword, // Store the hashed password
             email,
             registration_date: new Date().toISOString(),
             profile: {
@@ -137,8 +146,9 @@ app.post('/login', async (req, res) => {
             return res.status(404).send("User not found");
         }
 
-        // Check if the password matches (you should hash passwords in a real application)
-        if (user.password !== password) {
+        // Compare the plain text password with the hashed password
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+        if (!isPasswordValid) {
             return res.status(401).send("Invalid password");
         }
 
