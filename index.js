@@ -14,7 +14,7 @@ const uri = process.env.MONGO_URI; // Use MONGO_URI from .env
 app.listen(port, () => {
     console.log(`Example app listening on port ${port}`);
   });
-//aspdkasodkaso
+
 // Middleware to parse JSON requests
 app.use(express.json());
 
