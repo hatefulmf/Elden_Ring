@@ -37,21 +37,27 @@ async function connectToDB() {
   
 // Middleware to verify the token
 const verifyToken = (req, res, next) => {
-    const token = req.headers['authorization'];
+    const authHeader = req.headers['authorization'];
 
-    if (!token) {
-        return res.status(403).send("Token is required");
+    // Ensure the header exists and starts with 'Bearer'
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(403).send("Token is required or improperly formatted");
     }
+
+    // Extract the token from the header
+    const token = authHeader.split(' ')[1];
 
     jwt.verify(token, JWT_SECRET, (err, decoded) => {
         if (err) {
+            console.error("JWT verification error:", err.message); // Log the error for debugging
             return res.status(401).send("Invalid or expired token");
         }
 
-        req.user = decoded;
+        req.user = decoded; // Attach the decoded user information to the request
         next();
     });
 };
+
 
 // Middleware to verify admin role
 const verifyAdmin = (req, res, next) => {
