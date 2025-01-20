@@ -1,24 +1,40 @@
 const express = require('express');
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { MongoClient, ServerApiVersion } = require('mongodb');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
 const rateLimit = require('express-rate-limit');
 
-
+const credentials = process.env.CERTIFICATE; // Use CERTIFICATE from .env
 const JWT_SECRET = process.env.JWT_SECRET;
 const app = express();
-const port = process.env.port || 8080;
+const port = process.env.PORT || 8080;
 const uri = process.env.MONGO_URI; // Use MONGO_URI from .env
 
-const client = new MongoClient(uri, {
-    serverApi: {
-        version: ServerApiVersion.v1,
-        strict: true,
-        deprecationErrors: true
-    }
-});
+app.listen(port, () => {
+    console.log(`Example app listening on port ${port}`);
+  });
 
+// Middleware to parse JSON requests
+app.use(express.json());
+
+// Connect to MongoDB when the server starts
+async function connectToDB() {
+    try {
+      client = new MongoClient(uri, {
+        tlsCertificateKeyFile: credentials,
+        serverApi: ServerApiVersion.v1,
+      });
+      await client.connect();
+      console.log("Connected to MongoDB");
+    } catch (error) {
+      console.error("Error connecting to MongoDB:", error.message);
+    }
+  }
+  
+  // Call connectToDB once when the app starts
+  connectToDB();
+  
 // Middleware to verify the token
 const verifyToken = (req, res, next) => {
     const token = req.headers['authorization'];
@@ -45,43 +61,7 @@ const verifyAdmin = (req, res, next) => {
     next();
 };
 
-async function connectToDatabase() {
-    try {
-        await client.connect();
-        console.log("Connected to MongoDB");
-        
-        // Create unique index on username field
-        const database = client.db('Cluster');
-        const usersCollection = database.collection('users');
-        await usersCollection.createIndex({ username: 1 }, { unique: true });
-
-        // Initialize counter document if it doesn't exist
-        const countersCollection = database.collection('counters');
-        const counter = await countersCollection.findOne({ _id: 'user_id' });
-        if (!counter) {
-            await countersCollection.insertOne({ _id: 'user_id', seq: 0 });
-            console.log("Counter document initialized");
-        }
-
-        return client;
-    } catch (error) {
-        console.error("Error connecting to MongoDB:", error);
-        process.exit(1); // Exit if the database connection fails
-    }
-}
-
 app.use(express.json());
-
-// Function to get the next user ID
-async function getNextUserId(db) {
-    const countersCollection = db.collection('counters');
-    const result = await countersCollection.findOneAndUpdate(
-        { _id: 'user_id' },
-        { $inc: { seq: 1 } },
-        { returnDocument: 'after', upsert: true }
-    );
-    return result.value.seq;
-}
 
 // Routes
 app.get('/', (req, res) => {
@@ -154,21 +134,23 @@ app.get('/testEnv', (req, res) => {
     });
 });
 
-// Set up a rate limiter for login attempts on wrong password
+// Login route
+
+// Apply rate limiter only for login route
 const loginLimiter = rateLimit({
     windowMs: 1 * 60 * 1000, // 1 minute
     max: 3, // Allow 3 failed attempts per minute per username
-    message: "Too many failed login attempts, please try again in 1 minute",
-    keyGenerator: (req) => req.body.username, // Rate limit by username
+    keyGenerator: (req) => req.body.username || req.ip, // Use username if available, fallback to IP
     standardHeaders: true,
     legacyHeaders: false,
-    onLimitReached: (req, res) => {
-        console.log(`Rate limit reached for ${req.body.username}`);
+    handler: (req, res) => {
+        console.log(`Rate limit exceeded for ${req.body.username || req.ip}`);
+        res.status(429).send("Too many failed login attempts, please try again later.");
     }
 });
 
-// Login route
-app.post('/login', async (req, res) => {
+// Login route with rate limiter middleware
+app.post('/login', loginLimiter, async (req, res) => {
     const { username, password } = req.body;
 
     if (!username || !password) {
@@ -186,17 +168,14 @@ app.post('/login', async (req, res) => {
             return res.status(404).send("User not found");
         }
 
-        // If password doesn't match, apply rate limit
+        // Check password validity
         const isPasswordValid = await bcrypt.compare(password, user.password);
 
         if (!isPasswordValid) {
-            // Apply rate limiter for failed login attempt
-            loginLimiter(req, res, () => {});
-
             return res.status(401).send("Invalid password");
         }
 
-        // If login is successful, generate JWT
+        // Generate JWT token on successful login
         const token = jwt.sign({ user_id: user.user_id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '1h' });
 
         res.status(200).json({ message: "Login successful", token });
@@ -205,6 +184,8 @@ app.post('/login', async (req, res) => {
         res.status(500).send("Error logging in");
     }
 });
+
+module.exports = loginLimiter;
 
 // Example protected route
 app.get('/protectedRoute', verifyToken, (req, res) => {
@@ -528,9 +509,4 @@ app.get('/checkWeapon/:weapon_id', async (req, res) => {
         console.error("Error checking weapon existence:", error);
         res.status(500).send("Error checking weapon existence");
     }
-});
-
-app.listen(port, async () => {
-    await connectToDatabase(); // Ensure the database is connected before starting the server
-    console.log(`Server is running on port ${port}`);
 });
